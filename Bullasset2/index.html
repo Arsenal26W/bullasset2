@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bull Asset Manager v1.8.0</title>
+    <link class="apple-touch-icon" rel="apple-touch-icon" href="redbull.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0f0f0f;
+            color: #f1f1f1;
+            font-family: 'Noto Sans KR', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        input, select {
+            background-color: #1f1f1f !important;
+            border: 1px solid #373737 !important;
+            color: #f1f1f1 !important;
+            appearance: none;
+            -webkit-appearance: none;
+            border-radius: 12px;
+        }
+        input:focus, select:focus { border-color: #ff4e4e !important; outline: none; }
+        .bull-card { background-color: #1a1a1a; border: 1px solid #2d2d2d; border-radius: 16px; }
+        .grey-box { background-color: #2d2d2d; color: #fff; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; display: inline-block; }
+        .red-roi-badge { background-color: #ff4e4e; color: #fff; padding: 6px 12px; border-radius: 10px; font-weight: 900; font-size: 16px; }
+        .blue-roi-badge { background-color: #38bdf8; color: #fff; padding: 6px 12px; border-radius: 10px; font-weight: 900; font-size: 16px; }
+
+        /* 로딩 오버레이 */
+        #loading-overlay {
+            position: fixed; inset: 0; background: #0f0f0f;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 9999; gap: 20px;
+        }
+        #loading-overlay.hidden { display: none; }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid #2d2d2d;
+            border-top-color: #ff4e4e;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 저장 중 인디케이터 */
+        #sync-indicator {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #1a1a1a; border: 1px solid #2d2d2d;
+            color: #888; font-size: 11px; padding: 6px 14px;
+            border-radius: 20px; z-index: 1000;
+            display: flex; align-items: center; gap: 6px;
+            transition: opacity 0.3s; opacity: 0; pointer-events: none;
+        }
+        #sync-indicator.show { opacity: 1; }
+        #sync-indicator .dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: #ff4e4e; animation: pulse 1s infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    </style>
+</head>
+<body class="p-4 min-h-screen pb-24 select-none">
+
+    <!-- 로딩 오버레이 -->
+    <div id="loading-overlay">
+        <div>
+            <h1 class="text-2xl font-black tracking-tighter text-[#ff4e4e] text-center">BULL <span class="text-white">ASSET</span></h1>
+            <p class="text-[10px] text-[#555] text-center mt-1">데이터 동기화 중...</p>
+        </div>
+        <div class="spinner"></div>
+        <p id="loading-msg" class="text-xs text-[#555]">Google Sheets에서 불러오는 중</p>
+    </div>
+
+    <!-- 동기화 인디케이터 -->
+    <div id="sync-indicator"><div class="dot"></div><span id="sync-text">저장 중...</span></div>
+
+    <div class="max-w-md mx-auto">
+        <header class="flex justify-between items-center mb-4 px-1">
+            <div>
+                <h1 class="text-2xl font-black tracking-tighter text-[#ff4e4e] flex items-center gap-1.5">
+                    BULL <span class="text-white">ASSET</span>
+                    <img src="redbull.png" alt="Bull Icon" class="h-6 w-auto object-contain">
+                </h1>
+                <p class="text-[10px] text-[#888]">Google Cloud v2.0</p>
+            </div>
+            <div class="flex gap-1.5 items-center">
+                <button onclick="syncFromSheets()" class="bg-[#2d2d2d] text-white p-2 rounded-xl text-xs" title="Google Sheets에서 새로고침"><i class="fa-solid fa-rotate"></i></button>
+                <button onclick="backupAllData()" class="bg-[#2d2d2d] text-white p-2 rounded-xl text-xs" title="전체 데이터 백업 다운로드"><i class="fa-solid fa-download"></i></button>
+                <button onclick="document.getElementById('upload-file').click()" class="bg-[#2d2d2d] text-white p-2 rounded-xl text-xs" title="백업 파일 복원 업로드"><i class="fa-solid fa-upload"></i></button>
+                <input type="file" id="upload-file" class="hidden" accept=".json" onchange="restoreAllData(event)">
+                <button onclick="openModal()" class="bg-[#ff4e4e] active:scale-95 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg transition-all ml-0.5">+ 입력</button>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-3 gap-1 bg-[#1a1a1a] p-1 rounded-xl border border-[#2d2d2d] mb-5">
+            <button onclick="switchCategory('us')" id="cat-tab-us" class="py-2 rounded-lg text-xs font-black bg-[#ff4e4e] text-white transition-all">🇺🇸 미국</button>
+            <button onclick="switchCategory('kr')" id="cat-tab-kr" class="py-2 rounded-lg text-xs font-black text-[#888] transition-all">📊 ISA</button>
+            <button onclick="switchCategory('pension')" id="cat-tab-pension" class="py-2 rounded-lg text-xs font-black text-[#888] transition-all">💼 일반</button>
+        </div>
+
+        <div id="sub-tab-bar" class="flex gap-2 mb-5 overflow-x-auto no-scrollbar"></div>
+        <div id="main-viewport" class="space-y-4"></div>
+    </div>
+
+    <div id="input-modal" class="fixed inset-0 bg-black/90 flex items-end justify-center z-50 hidden">
+        <div class="bg-[#1a1a1a] w-full rounded-t-3xl p-6 space-y-5 animate-in slide-in-from-bottom duration-300">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black flex items-center gap-2">📝 <span id="modal-cat-title">미국주식</span> 데이터 기록</h3>
+                <button onclick="closeModal()" class="text-[#888] text-2xl font-bold p-2">&times;</button>
+            </div>
+            <div id="modal-tab-bar" class="flex border-b border-[#2d2d2d]"></div>
+            <div id="modal-content" class="py-2 max-h-[60vh] overflow-y-auto no-scrollbar"></div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════
+        // ██  GOOGLE SHEETS 동기화 DB 레이어  ██
+        // ★ GAS_URL 아래에 본인의 Apps Script 웹 앱 URL을 붙여넣으세요
+        // ═══════════════════════════════════════════════════════
+        const GAS_URL = 'YOUR_GAS_URL_HERE';
+
+        const cache = {};
+
+        const DB = {
+            get(key) {
+                return cache[key] !== undefined ? cache[key] : null;
+            },
+            set(key, value) {
+                cache[key] = value;
+                _saveToSheets(key, value);
+            },
+            async setAll(data) {
+                Object.assign(cache, data);
+                await _saveAllToSheets(data);
+            }
+        };
+
+        function showSync(text) {
+            const el = document.getElementById('sync-indicator');
+            document.getElementById('sync-text').textContent = text || '저장 중...';
+            el.classList.add('show');
+        }
+        function hideSync() {
+            setTimeout(() => document.getElementById('sync-indicator').classList.remove('show'), 1200);
+        }
+
+        async function _saveToSheets(key, value) {
+            try {
+                showSync('Sheets 저장 중...');
+                await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'set', key, value })
+                });
+                hideSync();
+            } catch(e) {
+                console.warn('Sheets 저장 실패 (캐시 유지됨):', e);
+                showSync('⚠ 저장 실패 (재시도 필요)');
+                setTimeout(() => hideSync(), 3000);
+            }
+        }
+
+        async function _saveAllToSheets(data) {
+            try {
+                showSync('Sheets 전체 업로드 중...');
+                await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'setAll', data })
+                });
+                showSync('✅ 동기화 완료');
+                hideSync();
+            } catch(e) {
+                console.warn('Sheets 전체 저장 실패:', e);
+                showSync('⚠ 업로드 실패');
+                setTimeout(() => hideSync(), 3000);
+            }
+        }
+
+        async function syncFromSheets() {
+            showLoadingOverlay('Google Sheets에서 불러오는 중...');
+            try {
+                const res = await fetch(GAS_URL + '?action=getAll');
+                const json = await res.json();
+                if(json.ok && json.data) {
+                    Object.assign(cache, json.data);
+                    hideLoadingOverlay();
+                    switchCategory(activeCat);
+                    showSync('✅ 동기화 완료');
+                    hideSync();
+                } else {
+                    hideLoadingOverlay();
+                    alert('Sheets에서 데이터를 불러올 수 없습니다.');
+                }
+            } catch(e) {
+                hideLoadingOverlay();
+                alert('Sheets 연결 실패: ' + e.message);
+            }
+        }
+
+        function showLoadingOverlay(msg) {
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            document.getElementById('loading-msg').textContent = msg || '로딩 중...';
+        }
+        function hideLoadingOverlay() {
+            document.getElementById('loading-overlay').classList.add('hidden');
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // ██  앱 코드 (localStorage → DB 전환 완료)  ██
+        // ═══════════════════════════════════════════════════════
+        const KEYS = {
+            us:      { inv: 'W_INV_US',  bal: 'W_BAL_US'  },
+            kr:      { inv: 'W_INV_KR',  bal: 'W_BAL_KR'  },
+            pension: { inv: 'W_INV_PEN', bal: 'W_BAL_PEN' }
+        };
+        const liveRate = 1350;
+
+        let activeCat = 'us'; let activeTab = 'status';
+        let investSub = 'yearly'; let balanceSub = 'yearly';
+        let periodicSub = 'month';
+        let periodicMode = 'list'; let modalActiveTab = '';
+        let isInvestOpen = false; let isBalanceOpen = false;
+
+        // 앱 시작: Sheets에서 전체 데이터 1회 로드
+        window.onload = async function() {
+            showLoadingOverlay('Google Sheets에서 불러오는 중...');
+            try {
+                const res = await fetch(GAS_URL + '?action=getAll');
+                const json = await res.json();
+                if(json.ok && json.data) {
+                    Object.assign(cache, json.data);
+                    if(!cache[KEYS.us.inv]) await initDefaultMockData();
+                } else {
+                    initDefaultMockDataSync();
+                }
+            } catch(e) {
+                console.warn('Sheets 로드 실패, 캐시로 시작:', e);
+                initDefaultMockDataSync();
+            }
+            hideLoadingOverlay();
+            switchCategory('us');
+        };
+
+        function initDefaultMockDataSync() {
+            if(!cache[KEYS.us.inv]) {
+                cache[KEYS.us.inv]  = JSON.stringify([{id:1, date:"2025-10-15", krw:60000000, rate:1365, usd:43956}, {id:2, date:"2026-01-10", krw:50000000, rate:1318, usd:37936}, {id:3, date:"2026-04-15", krw:10000000, rate:1348, usd:7418}]);
+                cache[KEYS.us.bal]  = JSON.stringify([{year:"2025", month:"10", usd:20000, rate:1345}, {year:"2025", month:"12", usd:20000, rate:1352}, {year:"2026", month:"01", usd:20000, rate:1318}, {year:"2026", month:"04", usd:21500, rate:1348}]);
+                cache[KEYS.kr.inv]  = JSON.stringify([{id:1, date:"2026-01-15", krw:30000000}]);
+                cache[KEYS.kr.bal]  = JSON.stringify([{year:"2026", month:"01", krw:29000000}, {year:"2026", month:"04", krw:33000000}]);
+                cache[KEYS.pension.inv] = JSON.stringify([{id:1, date:"2026-02-10", krw:8000000}]);
+                cache[KEYS.pension.bal] = JSON.stringify([{year:"2026", month:"04", krw:8300000}]);
+            }
+        }
+
+        async function initDefaultMockData() {
+            initDefaultMockDataSync();
+            await _saveAllToSheets(cache);
+        }
+
+        function switchCategory(cat) {
+            activeCat = cat; activeTab = 'status'; investSub = 'yearly'; balanceSub = 'yearly';
+            periodicSub = 'month'; periodicMode = 'list'; isInvestOpen = false; isBalanceOpen = false;
+            ['us','kr','pension'].forEach(c => {
+                const el = document.getElementById('cat-tab-' + c);
+                if(el) el.className = c === cat
+                    ? "py-2 rounded-lg text-xs font-black bg-[#ff4e4e] text-white transition-all"
+                    : "py-2 rounded-lg text-xs font-black text-[#888] transition-all";
+            });
+            renderSubTabBar(); renderMainViewport();
+        }
+
+        function renderSubTabBar() {
+            const bar = document.getElementById('sub-tab-bar'); if(!bar) return;
+            bar.innerHTML = `
+                <button onclick="switchSubTab('status')" id="sub-tab-status" class="px-5 py-2.5 rounded-full text-xs bg-[#ff4e4e] text-white font-bold whitespace-nowrap">📊 현황표</button>
+                <button onclick="switchSubTab('periodic')" id="sub-tab-periodic" class="px-5 py-2.5 rounded-full text-xs bg-[#1a1a1a] text-[#888] font-bold whitespace-nowrap">📈 집계표</button>`;
+        }
+
+        function switchSubTab(tab) {
+            activeTab = tab;
+            renderSubTabBar();
+            document.querySelectorAll('[id^="sub-tab-"]').forEach(btn => {
+                btn.classList.replace('bg-[#ff4e4e]', 'bg-[#1a1a1a]');
+                btn.classList.replace('text-white', 'text-[#888]');
+            });
+            const target = document.getElementById('sub-tab-' + tab);
+            if(target) { target.classList.replace('bg-[#1a1a1a]', 'bg-[#ff4e4e]'); target.classList.replace('text-[#888]', 'text-white'); }
+            setTimeout(renderMainViewport, 10);
+        }
+
+        function renderMainViewport() {
+            const vp = document.getElementById('main-viewport'); if(!vp) return; vp.innerHTML = '';
+            const inv = JSON.parse(DB.get(KEYS[activeCat]?.inv)) || [];
+            const bal = JSON.parse(DB.get(KEYS[activeCat]?.bal)) || [];
+
+            if(activeTab === 'status') {
+                if(activeCat === 'us') {
+                    let tKRW = inv.reduce((s,x)=>s+Number(x.krw),0);
+                    let tUSD = inv.reduce((s,x)=>s+Number(x.usd),0);
+                    let sortedBal = [...bal].sort((a,b)=>Number(b.year+b.month.padStart(2,'0'))-Number(a.year+a.month.padStart(2,'0')));
+                    let cUSD  = sortedBal.length > 0 ? Number(sortedBal[0].usd) : 0;
+                    let lRate = sortedBal.length > 0 ? (sortedBal[0].rate || liveRate) : liveRate;
+                    let netUSD = cUSD - tUSD; let netKRW = (cUSD * lRate) - tKRW;
+                    let roi = tUSD > 0 ? ((netUSD / tUSD) * 100).toFixed(1) : "0.0";
+                    let isPlus = netUSD >= 0;
+                    vp.innerHTML = `
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bull-card p-4"><div class="text-[10px] text-[#888] mb-1">총 투입 자금</div><div class="text-lg font-black text-white">$ ${tUSD.toLocaleString()}</div><div class="text-[10px] text-[#666] mt-1">₩ ${tKRW.toLocaleString()}</div></div>
+                            <div class="bull-card p-4"><div class="text-[10px] text-[#888] mb-1">현재 계좌잔고</div><div class="text-lg font-black text-white">$ ${cUSD.toLocaleString()}</div><div class="text-[10px] text-[#666] mt-1">₩ ${(cUSD*lRate).toLocaleString()}</div></div>
+                            <div class="bull-card p-5 col-span-2 ${isPlus?'bg-gradient-to-br from-[#1a1a1a] to-[#251414]':'bg-gradient-to-br from-[#1a1a1a] to-[#141d25]'} flex justify-between items-center">
+                                <div><div class="text-[11px] ${isPlus?'text-[#ff4e4e]':'text-sky-400'} mb-1 font-bold">순 누적수익</div><div class="text-2xl font-black ${isPlus?'text-[#ff4e4e]':'text-sky-400'}">${isPlus?'+':''}$ ${netUSD.toLocaleString()}</div><div class="text-xs ${isPlus?'text-[#ff4e4e]':'text-sky-400'} opacity-80">₩ ${netKRW.toLocaleString()}</div></div>
+                                <div class="${isPlus?'red-roi-badge':'blue-roi-badge'}">${isPlus?'+':''}${roi}%</div>
+                            </div>
+                        </div>
+                        ${getAccordionMarkup('투입 자금','invest',inv)}
+                        ${getAccordionMarkup('계좌 잔고','balance',bal)}`;
+                }
+                else if(activeCat === 'kr') {
+                    let tKRW = inv.reduce((s,x)=>s+Number(x.krw),0);
+                    let sortedBal = [...bal].sort((a,b)=>(b.year+b.month)-(a.year+a.month));
+                    let cKRW = sortedBal.length > 0 ? Number(sortedBal[0].krw) : 0;
+                    let netKRW = cKRW - tKRW;
+                    let roi = tKRW > 0 ? ((netKRW / tKRW) * 100).toFixed(1) : "0.0";
+                    let isPlus = netKRW >= 0;
+                    vp.innerHTML = `
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bull-card p-4"><div class="text-[10px] text-[#888] mb-1">총 투입 자금</div><div class="text-lg font-black text-white">₩ ${tKRW.toLocaleString()}</div></div>
+                            <div class="bull-card p-4"><div class="text-[10px] text-[#888] mb-1">현재 계좌잔고</div><div class="text-lg font-black text-white">₩ ${cKRW.toLocaleString()}</div></div>
+                            <div class="bull-card p-5 col-span-2 ${isPlus?'bg-gradient-to-br from-[#1a1a1a] to-[#251414]':'bg-gradient-to-br from-[#1a1a1a] to-[#141d25]'} flex justify-between items-center">
+                                <div><div class="text-[11px] ${isPlus?'text-[#ff4e4e]':'text-sky-400'} mb-1 font-bold">순 누적수익</div><div class="text-2xl font-black ${isPlus?'text-[#ff4e4e]':'text-sky-400'}">${isPlus?'+':''}₩ ${netKRW.toLocaleString()}</div></div>
+                                <div class="${isPlus?'red-roi-badge':'blue-roi-badge'}">${isPlus?'+':''}${roi}%</div>
+                            </div>
+                        </div>
+                        ${getAccordionMarkup('투입 자금','invest',inv)}
+                        ${getAccordionMarkup('계좌 잔고','balance',bal)}`;
+                }
+                else if(activeCat === 'pension') {
+                    let tKRW = inv.reduce((s,x)=>s+Number(x.krw||0),0);
+                    let sortedBal = [...bal].sort((a,b)=>Number(b.year+b.month.padStart(2,'0'))-Number(a.year+a.month.padStart(2,'0')));
+                    let cKRW = sortedBal.length > 0 ? Number(sortedBal[0].krw||0) : 0;
+                    let netKRW = cKRW - tKRW;
+                    let roi = tKRW > 0 ? ((netKRW / tKRW) * 100).toFixed(1) : "0.0";
+                    let isPlus = netKRW >= 0;
+                    vp.innerHTML = `
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bull-card p-4"><div class="text-[10px] text-[#888] mb-1">총 투입 자금</div><div class="text-lg font-black text-white">₩ ${tKRW.toLocaleString()}</div></div>
+                            <div class="bull-card p-4"><div class="text-[10px] text-[#888] mb-1">현재 계좌잔고</div><div class="text-lg font-black text-white">₩ ${cKRW.toLocaleString()}</div></div>
+                            <div class="bull-card p-5 col-span-2 ${isPlus?'bg-gradient-to-br from-[#1a1a1a] to-[#251414]':'bg-gradient-to-br from-[#1a1a1a] to-[#141d25]'} flex justify-between items-center">
+                                <div><div class="text-[11px] ${isPlus?'text-[#ff4e4e]':'text-sky-400'} mb-1 font-bold">순 누적수익</div><div class="text-2xl font-black ${isPlus?'text-[#ff4e4e]':'text-sky-400'}">${isPlus?'+':''}₩ ${netKRW.toLocaleString()}</div></div>
+                                <div class="${isPlus?'red-roi-badge':'blue-roi-badge'}">${isPlus?'+':''}${roi}%</div>
+                            </div>
+                        </div>
+                        ${getAccordionMarkup('투입 자금','invest',inv)}
+                        ${getAccordionMarkup('계좌 잔고','balance',bal)}`;
+                }
+            }
+            else if(activeTab === 'periodic') {
+                vp.innerHTML = `
+                    <div class="flex justify-center mb-3">
+                        <div class="bg-[#1a1a1a] p-1 rounded-xl flex gap-1 w-full">
+                            <button onclick="togglePeriodicTable('month')"   id="btn-p-month"   class="flex-1 py-2 text-xs rounded-lg ${periodicSub==='month'  ?'bg-[#ff4e4e] text-white':'text-[#888]'} font-bold transition-all">월별</button>
+                            <button onclick="togglePeriodicTable('quarter')" id="btn-p-quarter" class="flex-1 py-2 text-xs rounded-lg ${periodicSub==='quarter'?'bg-[#ff4e4e] text-white':'text-[#888]'} font-bold transition-all">분기별</button>
+                            <button onclick="togglePeriodicTable('year')"    id="btn-p-year"    class="flex-1 py-2 text-xs rounded-lg ${periodicSub==='year'   ?'bg-[#ff4e4e] text-white':'text-[#888]'} font-bold transition-all">연도별</button>
+                        </div>
+                    </div>
+                    <div class="flex justify-start gap-1 mb-2">
+                        <div class="bg-[#111] p-0.5 rounded-lg flex gap-0.5">
+                            <button onclick="switchPeriodicMode('list')"  id="btn-p-list"  class="px-4 py-1 text-[10px] rounded-md ${periodicMode==='list' ?'bg-[#2d2d2d] text-white':'text-[#888]'} font-bold">목록</button>
+                            <button onclick="switchPeriodicMode('chart')" id="btn-p-chart" class="px-4 py-1 text-[10px] rounded-md ${periodicMode==='chart'?'bg-[#2d2d2d] text-white':'text-[#888]'} font-bold">차트</button>
+                        </div>
+                    </div>
+                    <div id="periodic-content-viewport" class="space-y-3"></div>
+                    <div id="periodic-chart-viewport" class="bull-card p-4 hidden"><div class="h-64 w-full relative"><canvas id="roiLineChart"></canvas></div></div>`;
+                renderPeriodicData();
+            }
+        }
+
+        function getAccordionMarkup(title, type, dataList) {
+            let isOpen = type === 'invest' ? isInvestOpen : isBalanceOpen;
+            let sumUSD = 0; let sumKRW = 0;
+            if(activeCat === 'us') {
+                if(type === 'invest') { sumUSD = dataList.reduce((s,x)=>s+Number(x.usd),0); sumKRW = dataList.reduce((s,x)=>s+Number(x.krw),0); }
+                else { let sb = [...dataList].sort((a,b)=>(b.year+b.month)-(a.year+a.month)); sumUSD = sb.length>0?Number(sb[0].usd):0; sumKRW = sb.length>0?(sumUSD*(sb[0].rate||liveRate)):0; }
+            } else {
+                if(type === 'invest') { sumKRW = dataList.reduce((s,x)=>s+Number(x.krw),0); }
+                else {
+                    let sb = [...dataList].sort((a,b)=>Number(b.year+b.month.padStart(2,'0'))-Number(a.year+a.month.padStart(2,'0')));
+                    sumKRW = sb.length > 0 ? Number(sb[0].krw||0) : 0;
+                }
+            }
+
+            let listBody = '';
+            let currentSub = type === 'invest' ? investSub : balanceSub;
+
+            if(isOpen) {
+                if(currentSub === 'yearly') {
+                    let map = {};
+                    if(activeCat === 'us') {
+                        if(type === 'invest') {
+                            dataList.forEach(x=>{ let y=x.date?x.date.split('-')[0]:x.year; map[y]=map[y]||{k:0,u:0}; map[y].k+=Number(x.krw||0); map[y].u+=Number(x.usd||0); });
+                            Object.keys(map).sort().reverse().forEach(y=>{
+                                listBody += `<div class="bg-[#222] p-4 rounded-xl border border-[#2d2d2d] space-y-2"><div><span class="grey-box">${y}년</span></div><div class="flex justify-between items-center text-xs pt-1"><div><span class="text-[10px] text-[#888] block mb-0.5">총 환산 달러</span><span class="font-bold text-[#ff4e4e]">$${map[y].u.toLocaleString()}</span></div><div><span class="text-[10px] text-[#888] block mb-0.5">총 투입 한화</span><span class="font-bold text-white">₩${map[y].k.toLocaleString()}</span></div><div class="text-right"><span class="text-[10px] text-[#888] block mb-0.5">평균 적용환율</span><span class="font-bold text-[#aaa]">₩${Math.round(map[y].k/map[y].u).toLocaleString()}</span></div></div></div>`;
+                            });
+                        } else {
+                            const cy = String(new Date().getFullYear()); let yMap = {};
+                            dataList.forEach(x=>{ if(!yMap[x.year]) yMap[x.year]=[]; yMap[x.year].push(x); });
+                            Object.keys(yMap).sort().reverse().forEach(y=>{
+                                let entries = yMap[y].sort((a,b)=>Number(b.month.padStart(2,'0'))-Number(a.month.padStart(2,'0')));
+                                let entry = y < cy ? (entries.find(x=>x.month==='12')||entries[0]) : entries[0];
+                                let usd=Number(entry.usd||0); let rate=Number(entry.rate||liveRate);
+                                listBody += `<div class="bg-[#222] p-4 rounded-xl border border-[#2d2d2d] space-y-2"><div><span class="grey-box">${y}년</span></div><div class="flex justify-between items-center text-xs pt-1"><div><span class="text-[10px] text-[#888] block mb-0.5">계좌 잔고</span><span class="font-bold text-[#ff4e4e]">$${usd.toLocaleString()}</span></div><div class="text-right"><span class="text-[10px] text-[#888] block mb-0.5">적용 환율</span><span class="font-bold text-[#aaa]">₩${rate.toLocaleString()}</span></div><div class="text-right"><span class="text-[10px] text-[#888] block mb-0.5">원화 환산</span><span class="font-bold text-white">₩${(usd*rate).toLocaleString()}</span></div></div></div>`;
+                            });
+                        }
+                    } else {
+                        if(type === 'balance') {
+                            const cy = String(new Date().getFullYear()); let yMap = {};
+                            dataList.forEach(x=>{ if(!yMap[x.year]) yMap[x.year]=[]; yMap[x.year].push(x); });
+                            Object.keys(yMap).sort().reverse().forEach(y=>{
+                                let entries = yMap[y].sort((a,b)=>Number(b.month.padStart(2,'0'))-Number(a.month.padStart(2,'0')));
+                                let val = y < cy ? Number((entries.find(x=>x.month==='12')||entries[0]).krw) : Number(entries[0].krw);
+                                listBody += `<div class="bg-[#222] p-4 rounded-xl border border-[#2d2d2d] flex justify-between items-center text-xs"><div><span class="grey-box">${y}년</span></div><div class="text-right font-bold text-white text-sm">₩${val.toLocaleString()}</div></div>`;
+                            });
+                        } else {
+                            dataList.forEach(x=>{ let y=x.date?x.date.split('-')[0]:x.year; map[y]=(map[y]||0)+Number(x.krw); });
+                            Object.keys(map).sort().reverse().forEach(y=>{
+                                listBody += `<div class="bg-[#222] p-4 rounded-xl border border-[#2d2d2d] flex justify-between items-center text-xs"><div><span class="grey-box">${y}년</span></div><div class="text-right font-bold text-white text-sm">₩${map[y].toLocaleString()}</div></div>`;
+                            });
+                        }
+                    }
+                } else {
+                    let sorted = [...dataList];
+                    if(type==='invest') sorted.sort((a,b)=>new Date(b.date)-new Date(a.date));
+                    else sorted.sort((a,b)=>(b.year+b.month)-(a.year+a.month));
+
+                    if(activeCat === 'us') {
+                        sorted.forEach(x=>{
+                            listBody += `
+                                <div class="bg-[#222] p-4 rounded-xl border border-[#2d2d2d] space-y-2 relative text-xs">
+                                    <div class="flex justify-between"><span class="grey-box">${x.date||x.year+'.'+Number(x.month)+'월'}</span><button onclick="deleteRecord('${type}','${x.id||x.year+x.month}')" class="text-[#555] px-1 active:text-red-400"><i class="fa-solid fa-trash-can"></i></button></div>
+                                    <div class="flex justify-between items-center text-xs pt-1"><div><span class="text-[10px] text-[#888] block mb-0.5">환산 달러</span><span class="font-bold text-[#ff4e4e]">$${Number(x.usd).toLocaleString()}</span></div><div><span class="text-[10px] text-[#888] block mb-0.5">투입 한화</span><span class="font-bold text-white">₩${Number(x.krw||(x.usd*(x.rate||liveRate))).toLocaleString()}</span></div><div class="text-right"><span class="text-[10px] text-[#888] block mb-0.5">적용 환율</span><span class="font-bold text-[#aaa]">₩${Number(x.rate||liveRate)}</span></div></div>
+                                </div>`;
+                        });
+                    } else {
+                        sorted.forEach(x=>{
+                            listBody += `
+                                <div class="bg-[#222] p-3 rounded-xl border border-[#2d2d2d] flex justify-between items-center text-xs">
+                                    <span class="grey-box">${x.date||x.year+'.'+Number(x.month)+'월'}</span>
+                                    <div class="flex items-center gap-2 ml-auto text-right font-bold"><span class="text-white">₩${Number(x.krw).toLocaleString()}</span><button onclick="deleteRecord('${type}','${x.id||x.year+x.month}')" class="text-[#555] active:text-red-500 pl-1"><i class="fa-solid fa-trash-can"></i></button></div>
+                                </div>`;
+                        });
+                    }
+                }
+            }
+
+            let headerTitle = type==='invest'?'총 투입 자금':'현재 계좌잔고';
+            return `
+                <div class="bull-card p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-sm font-bold">${title}</h3>
+                        <div class="bg-[#0f0f0f] p-1 rounded-lg flex gap-1">
+                            <button onclick="setSubToggle('${type}','yearly')" class="px-2.5 py-1 text-[10px] rounded-md ${currentSub==='yearly'?'bg-[#2d2d2d] text-white':'text-[#888]'}">연도별</button>
+                            <button onclick="setSubToggle('${type}','detail')" class="px-2.5 py-1 text-[10px] rounded-md ${currentSub==='detail'?'bg-[#2d2d2d] text-white':'text-[#888]'}">상세(일자별)</button>
+                        </div>
+                    </div>
+                    <div onclick="toggleAccordion('${type}')" class="bg-[#252525] p-3 rounded-xl border border-[#3d3d3d] flex justify-between items-center cursor-pointer active:bg-[#333] transition-all text-xs">
+                        <div class="grey-box bg-[#444]">${headerTitle}</div>
+                        <div class="flex items-center gap-3">
+                            <div class="text-right font-bold">
+                                ${activeCat==='us'
+                                    ? `<div class="text-[#ff4e4e] font-black">$ ${sumUSD.toLocaleString()}</div><div class="text-[10px] text-[#aaa]">₩ ${sumKRW.toLocaleString()}</div>`
+                                    : `<div class="text-white font-black">₩ ${sumKRW.toLocaleString()}</div>`}
+                            </div>
+                            <i class="fa-solid fa-caret-down text-[#888] transition-transform" style="transform:${isOpen?'rotate(180deg)':'rotate(0deg)'}"></i>
+                        </div>
+                    </div>
+                    ${isOpen ? `<div class="space-y-2 mt-3 animate-in fade-in duration-200">${listBody}</div>` : ''}
+                </div>`;
+        }
+
+        function switchPeriodicMode(mode) { periodicMode = mode; renderMainViewport(); }
+        function togglePeriodicTable(type) { periodicSub = type; renderMainViewport(); }
+
+        function renderPeriodicData() {
+            const listVP  = document.getElementById('periodic-content-viewport');
+            const chartVP = document.getElementById('periodic-chart-viewport');
+            if(!listVP) return;
+
+            const inv = JSON.parse(DB.get(KEYS[activeCat].inv)) || [];
+            const bal = JSON.parse(DB.get(KEYS[activeCat].bal)) || [];
+
+            if(bal.length === 0) {
+                listVP.innerHTML = '<div class="text-center text-xs text-[#666] py-12">집계표 산출 데이터가 부족합니다. 먼저 계좌잔고를 기입해 주세요.</div>';
+                return;
+            }
+
+            const chronInv = [...inv].sort((a,b)=>new Date(a.date)-new Date(b.date));
+            const chronBal = [...bal].sort((a,b)=>(a.year+a.month)-(b.year+b.month));
+            let periods = [];
+
+            if(periodicSub === 'month') {
+                chronBal.forEach(b => {
+                    let y=b.year; let m=b.month;
+                    let lastDec = chronBal.find(x=>x.year==String(Number(y)-1)&&x.month=="12");
+                    let startBal = activeCat==='us' ? (lastDec?Number(lastDec.usd):0) : (lastDec?Number(lastDec.krw||0):0);
+                    let ytd=0, mon=0;
+                    if(activeCat==='us') {
+                        ytd = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]<=m).reduce((s,x)=>s+Number(x.usd),0);
+                        mon = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]==m).reduce((s,x)=>s+Number(x.usd),0);
+                    } else {
+                        ytd = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]<=m).reduce((s,x)=>s+Number(x.krw),0);
+                        mon = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]==m).reduce((s,x)=>s+Number(x.krw),0);
+                    }
+                    let annBal = startBal+ytd;
+                    let accBal = activeCat==='us' ? Number(b.usd) : Number(b.krw||0);
+                    let roi = annBal>0?(((accBal-annBal)/annBal)*100).toFixed(1):"0.0";
+                    periods.push({ label:`${y}.${Number(m)}월`, chartLabel:`${y.substring(2)}.${Number(m)}월`, annualBalance:annBal, accountBalance:accBal, annualROI:Number(roi), hasInvest:mon>0 });
+                });
+            } else if(periodicSub === 'quarter') {
+                let qMap={}; chronBal.forEach(b=>{let q=Math.ceil(Number(b.month)/3); qMap[b.year+'-'+q]=b;});
+                Object.keys(qMap).sort().forEach(k=>{
+                    let [y,q]=k.split('-');
+                    let lastDec=chronBal.find(x=>x.year==String(Number(y)-1)&&x.month=="12");
+                    let startBal=activeCat==='us'?(lastDec?Number(lastDec.usd):0):(lastDec?Number(lastDec.krw||0):0);
+                    let ytd=activeCat==='us'
+                        ? chronInv.filter(x=>x.date.startsWith(y)&&Math.ceil(Number(x.date.split('-')[1])/3)<=q).reduce((s,x)=>s+Number(x.usd),0)
+                        : chronInv.filter(x=>x.date.startsWith(y)&&Math.ceil(Number(x.date.split('-')[1])/3)<=q).reduce((s,x)=>s+Number(x.krw),0);
+                    let annBal=startBal+ytd; let bObj=qMap[k];
+                    let accBal=activeCat==='us'?Number(bObj.usd):Number(bObj.krw||0);
+                    let roi=annBal>0?(((accBal-annBal)/annBal)*100).toFixed(1):"0.0";
+                    periods.push({label:`${y}.${q}Q`,chartLabel:`${y.substring(2)}.${q}Q`,annualBalance:annBal,accountBalance:accBal,annualROI:Number(roi),hasInvest:false});
+                });
+            } else if(periodicSub === 'year') {
+                let yMap={}; chronBal.forEach(b=>{yMap[b.year]=b;});
+                Object.keys(yMap).sort().forEach(y=>{
+                    let lastDec=chronBal.find(x=>x.year==String(Number(y)-1)&&x.month=="12");
+                    let startBal=activeCat==='us'?(lastDec?Number(lastDec.usd):0):(lastDec?Number(lastDec.krw||0):0);
+                    let ytd=activeCat==='us'
+                        ? chronInv.filter(x=>x.date.startsWith(y)).reduce((s,x)=>s+Number(x.usd),0)
+                        : chronInv.filter(x=>x.date.startsWith(y)).reduce((s,x)=>s+Number(x.krw),0);
+                    let annBal=startBal+ytd; let bObj=yMap[y];
+                    let accBal=activeCat==='us'?Number(bObj.usd):Number(bObj.krw||0);
+                    let roi=annBal>0?(((accBal-annBal)/annBal)*100).toFixed(1):"0.0";
+                    periods.push({label:`${y}년`,chartLabel:`${y}년`,annualBalance:annBal,accountBalance:accBal,annualROI:Number(roi),hasInvest:false});
+                });
+            }
+
+            if(periodicMode === 'list') {
+                if(listVP) listVP.classList.remove('hidden'); if(chartVP) chartVP.classList.add('hidden');
+                let buf='';
+                [...periods].reverse().forEach(p=>{
+                    let isPlus=p.annualROI>=0;
+                    let badge=p.hasInvest?`<span class="text-[9px] bg-[#ff4e4e] text-white px-1.5 py-0.5 rounded-full font-black ml-2 inline-block align-middle">💰 투입월</span>`:"";
+                    let profitAmt=p.accountBalance-p.annualBalance;
+                    let pc=profitAmt>=0?'text-[#ff4e4e]':'text-sky-400';
+                    let rc=isPlus?'text-[#ff4e4e]':'text-sky-400';
+                    function fmtAmt(v){ if(activeCat==='us') return '$'+Math.round(v).toLocaleString(); return Math.round(v/10000).toLocaleString()+'만'; }
+                    function fmtProfit(v){ if(activeCat==='us') return (v>=0?'+$':'-$')+Math.abs(Math.round(v)).toLocaleString(); return (v>=0?'+':'-')+Math.round(Math.abs(v)/10000).toLocaleString()+'만'; }
+                    buf+=`
+                        <div class="bg-[#1a1a1a] p-4 rounded-xl border border-[#2d2d2d] space-y-3 text-xs">
+                            <div class="flex items-center"><span class="grey-box">${p.label}</span>${badge}</div>
+                            <div class="grid grid-cols-4 text-center text-xs gap-1">
+                                <div><span class="text-[9px] text-[#888] block mb-0.5">연간잔고</span><span class="text-[11px] font-bold text-[#aaa]">${fmtAmt(p.annualBalance)}</span></div>
+                                <div><span class="text-[9px] text-[#888] block mb-0.5">계좌잔고</span><span class="text-[11px] font-bold text-white">${fmtAmt(p.accountBalance)}</span></div>
+                                <div><span class="text-[9px] ${pc} block font-bold mb-0.5">수익금액</span><span class="text-[11px] font-black ${pc}">${fmtProfit(profitAmt)}</span></div>
+                                <div><span class="text-[9px] ${rc} block font-bold mb-0.5">연간수익률</span><span class="text-[11px] font-black ${rc}">${isPlus?'+':''}${p.annualROI}%</span></div>
+                            </div>
+                        </div>`;
+                });
+                listVP.innerHTML = buf;
+            } else {
+                if(listVP) listVP.classList.add('hidden'); if(chartVP) chartVP.classList.remove('hidden');
+                setTimeout(()=>drawCoreLineChart(periods.map(p=>p.chartLabel), periods.map(p=>p.annualROI)), 20);
+            }
+        }
+
+        let mainChartInst = null;
+        function drawCoreLineChart(labels, data) {
+            if(mainChartInst){ mainChartInst.destroy(); mainChartInst=null; }
+            const canvas=document.getElementById('roiLineChart'); if(!canvas) return;
+            const ctx=canvas.getContext('2d');
+            const pointColors=data.map(v=>v>=0?'#C62828':'#1565C0');
+            mainChartInst=new Chart(ctx,{
+                type:'line', data:{labels, datasets:[{data, borderColor:'rgba(160,160,160,0.3)', backgroundColor:'rgba(160,160,160,0.03)', borderWidth:2, pointBackgroundColor:pointColors, pointBorderColor:pointColors, pointRadius:6, fill:true}]},
+                options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, datalabels:{display:true,align:'top',color:'#fff',backgroundColor:'#2d2d2d',borderRadius:6,font:{weight:'bold',size:10},formatter:(v)=>v+'%'}}, scales:{x:{grid:{color:'#252525'},ticks:{color:'#888'}},y:{grid:{color:'#252525'},ticks:{color:'#888'}}}}, plugins:[ChartDataLabels]
+            });
+        }
+
+        function openModal() {
+            modalDraft={};
+            document.getElementById('input-modal').classList.remove('hidden');
+            const catTitle=activeCat==='us'?'미국주식':(activeCat==='kr'?'ISA':'일반');
+            document.getElementById('modal-cat-title').innerText=catTitle;
+            const tc=document.getElementById('modal-tab-bar'); if(!tc) return;
+            tc.innerHTML=`<button onclick="setModalTab('invest')" id="m-tab-invest" class="flex-1 py-3 text-xs font-bold border-b-2 border-[#ff4e4e] text-white">💰 투입자금</button><button onclick="setModalTab('balance')" id="m-tab-balance" class="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-[#888]">📈 계좌잔고</button>`;
+            setModalTab('invest');
+        }
+
+        function closeModal(){ document.getElementById('input-modal').classList.add('hidden'); modalDraft={}; }
+
+        let modalDraft={};
+
+        function saveDraft(){
+            if(!modalActiveTab) return;
+            const draft={};
+            ['f-date','f-krw','f-usd','f-rate','f-year','f-month'].forEach(id=>{
+                const el=document.getElementById(id); if(el) draft[id]=el.value;
+            });
+            modalDraft[modalActiveTab]=draft;
+        }
+
+        function restoreDraft(tab){
+            const draft=modalDraft[tab]; if(!draft) return;
+            Object.keys(draft).forEach(id=>{ const el=document.getElementById(id); if(el&&draft[id]) el.value=draft[id]; });
+        }
+
+        function setModalTab(tab){
+            saveDraft();
+            modalActiveTab=tab;
+            document.querySelectorAll('[id^="m-tab-"]').forEach(b=>{ b.className="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-[#888]"; });
+            const tgt=document.getElementById('m-tab-'+tab); if(tgt) tgt.className="flex-1 py-3 text-xs font-bold border-b-2 border-[#ff4e4e] text-white";
+            const cc=document.getElementById('modal-content'); if(!cc) return;
+            const yOpts=`2025,2026,2027,2028`.split(',').map(y=>`<option value="${y}" ${y==='2026'?'selected':''}>${y}년</option>`).join('');
+            const mOpts=Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')).map(m=>`<option value="${m}" ${m==='05'?'selected':''}>${Number(m)}월</option>`).join('');
+
+            if(activeCat==='us'){
+                if(tab==='invest'){
+                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><input type="date" id="f-date" required class="w-full p-4"><div class="grid grid-cols-2 gap-2"><div><label class="block text-[10px] text-[#888] mb-1">한화 투입액 (₩)</label><input type="text" id="f-krw" placeholder="원화입력" required class="w-full p-4" oninput="formatComma(this)"></div><div><label class="block text-[10px] text-[#888] mb-1">달러 환전액 ($)</label><input type="text" id="f-usd" placeholder="달러입력" required class="w-full p-4" oninput="formatComma(this)"></div></div><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
+                } else {
+                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><div class="grid grid-cols-2 gap-2"><select id="f-year" class="p-4">${yOpts}</select><select id="f-month" class="p-4">${mOpts}</select></div><div class="grid grid-cols-2 gap-2"><div><label class="block text-[10px] text-[#888] mb-1">달러 계좌 잔고 ($)</label><input type="text" id="f-usd" placeholder="달러잔고" required class="w-full p-4" oninput="formatComma(this)"></div><div><label class="block text-[10px] text-[#888] mb-1">적용 고시 환율 (₩)</label><input type="text" id="f-rate" placeholder="현재환율" required class="w-full p-4" oninput="formatComma(this)"></div></div><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
+                }
+            } else {
+                if(tab==='invest'){
+                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><input type="date" id="f-date" required class="w-full p-4"><input type="text" id="f-krw" placeholder="원화입력" required class="w-full p-4" oninput="formatComma(this)"><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
+                } else {
+                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><div class="grid grid-cols-2 gap-2"><select id="f-year" class="p-4">${yOpts}</select><select id="f-month" class="p-4">${mOpts}</select></div><input type="text" id="f-krw" placeholder="원화 계좌잔고" required class="w-full p-4" oninput="formatComma(this)"><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
+                }
+            }
+            restoreDraft(tab);
+        }
+
+        function handleFormSubmit(e){
+            e.preventDefault(); triggerSaveFeedback();
+            delete modalDraft[modalActiveTab];
+            if(activeCat==='us'){
+                let sk=modalActiveTab==='invest'?'inv':'bal';
+                let list=JSON.parse(DB.get(KEYS.us[sk]))||[];
+                if(modalActiveTab==='invest'){
+                    let k=parseNum(document.getElementById('f-krw').value||0); let u=parseNum(document.getElementById('f-usd').value||0);
+                    list.push({id:Date.now(), date:document.getElementById('f-date').value, krw:k, usd:u, rate:u>0?Math.round(k/u):liveRate});
+                } else {
+                    let y=document.getElementById('f-year').value; let m=document.getElementById('f-month').value;
+                    list=list.filter(x=>!(x.year===y&&x.month===m));
+                    list.push({year:y, month:m, usd:parseNum(document.getElementById('f-usd').value||0), rate:parseNum(document.getElementById('f-rate').value||liveRate)});
+                }
+                DB.set(KEYS.us[sk], JSON.stringify(list));
+            } else {
+                let sk=modalActiveTab==='invest'?'inv':'bal';
+                let catKey=activeCat==='kr'?'kr':'pension';
+                let list=JSON.parse(DB.get(KEYS[catKey][sk]))||[];
+                if(modalActiveTab==='invest'){
+                    list.push({id:Date.now(), date:document.getElementById('f-date').value, krw:parseNum(document.getElementById('f-krw').value||0)});
+                } else {
+                    let y=document.getElementById('f-year').value; let m=document.getElementById('f-month').value;
+                    list=list.filter(x=>!(x.year===y&&x.month===m));
+                    list.push({year:y, month:m, krw:parseNum(document.getElementById('f-krw').value||0)});
+                }
+                DB.set(KEYS[catKey][sk], JSON.stringify(list));
+            }
+            closeModal(); renderMainViewport();
+        }
+
+        function deleteRecord(type, id){
+            if(!confirm("해당 원장 기록을 지우시겠습니까?")) return;
+            let sk=type==='invest'?'inv':'bal';
+            let list=JSON.parse(DB.get(KEYS[activeCat][sk]))||[];
+            if(type==='invest') list=list.filter(x=>x.id!=id);
+            else list=list.filter(x=>(x.year+x.month)!=id);
+            DB.set(KEYS[activeCat][sk], JSON.stringify(list));
+            renderMainViewport();
+        }
+
+        function backupAllData(){
+            let bk={}; Object.keys(KEYS).forEach(c=>{ Object.keys(KEYS[c]).forEach(k=>{ bk[KEYS[c][k]]=DB.get(KEYS[c][k]); }); });
+            const blob=new Blob([JSON.stringify(bk)],{type:'application/json'}); const url=URL.createObjectURL(blob);
+            const a=document.createElement('a'); a.href=url; a.download='BULL_WIFE_PORTFOLIO_MASTER.json'; a.click();
+        }
+
+        function restoreAllData(e){
+            const file=e.target.files[0]; if(!file) return;
+            const reader=new FileReader();
+            reader.onload=async function(evt){
+                try {
+                    const data=JSON.parse(evt.target.result);
+                    await DB.setAll(data);
+                    triggerSaveFeedback(); switchCategory(activeCat);
+                    alert("🚀 데이터 허브 원장 복원이 완벽하게 처리되었습니다!");
+                } catch(err){ alert("❌ 백업 파일 파싱에 실패했습니다."); }
+            };
+            reader.readAsText(file);
+        }
+
+        function parseNum(val){ if(typeof val==='number') return val; return Number(String(val).replace(/[^0-9.-]/g,''))||0; }
+        function formatComma(el){ let r=el.value.replace(/[^0-9]/g,''); el.value=r?Number(r).toLocaleString():''; }
+
+        function triggerSaveFeedback(){
+            const btn=document.querySelector('button[onclick="openModal()"]'); if(!btn) return;
+            const orig=btn.textContent; btn.textContent='✅ 저장됨';
+            setTimeout(()=>{ btn.textContent=orig; },1000);
+        }
+
+        function toggleAccordion(type){ if(type==='invest') isInvestOpen=!isInvestOpen; else isBalanceOpen=!isBalanceOpen; renderMainViewport(); }
+        function setSubToggle(type,sub){ if(type==='invest') investSub=sub; else balanceSub=sub; renderMainViewport(); }
+
+    </script>
+</body>
+</html>
