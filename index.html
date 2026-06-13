@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Bull Asset">
     <title>Bull Asset Manager v1.8.0</title>
     <link class="apple-touch-icon" rel="apple-touch-icon" href="redbull.png">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -17,6 +20,26 @@
             font-family: 'Noto Sans KR', sans-serif;
             -webkit-font-smoothing: antialiased;
             -webkit-tap-highlight-color: transparent;
+            height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        #fixed-top {
+            flex-shrink: 0;
+            padding: 16px 16px 0;
+            max-width: 448px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        #scroll-area {
+            flex: 1;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 0 16px 40px;
+            max-width: 448px;
+            width: 100%;
+            margin: 0 auto;
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -68,7 +91,7 @@
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
     </style>
 </head>
-<body class="p-4 min-h-screen pb-24 select-none">
+<body class="select-none">
 
     <!-- 로딩 오버레이 -->
     <div id="loading-overlay">
@@ -83,7 +106,7 @@
     <!-- 동기화 인디케이터 -->
     <div id="sync-indicator"><div class="dot"></div><span id="sync-text">저장 중...</span></div>
 
-    <div class="max-w-md mx-auto">
+    <div id="fixed-top">
         <header class="flex justify-between items-center mb-4 px-1">
             <div>
                 <h1 class="text-2xl font-black tracking-tighter text-[#ff4e4e] flex items-center gap-1.5">
@@ -107,7 +130,10 @@
             <button onclick="switchCategory('pension')" id="cat-tab-pension" class="py-2 rounded-lg text-xs font-black text-[#888] transition-all">💼 일반</button>
         </div>
 
-        <div id="sub-tab-bar" class="flex gap-2 mb-5 overflow-x-auto no-scrollbar"></div>
+        <div id="sub-tab-bar" class="flex gap-2 mb-4 overflow-x-auto no-scrollbar"></div>
+    </div><!-- /fixed-top -->
+
+    <div id="scroll-area">
         <div id="main-viewport" class="space-y-4"></div>
     </div>
 
