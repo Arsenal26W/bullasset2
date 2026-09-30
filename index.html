@@ -528,54 +528,59 @@
                 return;
             }
 
-            const chronInv = [...inv].sort((a,b)=>new Date(a.date)-new Date(b.date));
-            const chronBal = [...bal].sort((a,b)=>(a.year+a.month)-(b.year+b.month));
-            let periods = [];
+            // ── 집계표 = 그 해의 순수 수익률 ──
+            // 분모 = 연초 기준금액(직전 연도 12월 잔고) + 그 해 1월부터 해당 월까지 넣은 돈
+            // 분자 = 해당 월 잔고 - 분모
+            const balOf = x => activeCat==='us' ? Number(x.usd||0) : Number(x.krw||0);
+            const invOf = x => activeCat==='us' ? Number(x.usd||0) : Number(x.krw||0);
+            const ym = x => x.year+'-'+String(x.month).padStart(2,'0');   // 잔고 기록의 '연-월'
+            const chronInv = [...inv].filter(x=>x.date).sort((a,b)=>a.date<b.date?-1:1);
+            const chronBal = [...bal].sort((a,b)=>ym(a)<ym(b)?-1:1);
 
+            // 연초 기준금액: 직전 연도 12월 잔고
+            // 12월 잔고가 없으면 → 그 이전 마지막 잔고 + 그 뒤 연말까지 넣은 돈
+            // 이전 잔고 기록이 아예 없으면 → 그 해 이전에 넣은 돈 전체
+            function yearStartBase(y){
+                const prevY=String(Number(y)-1);
+                const dec=chronBal.find(x=>x.year===prevY&&String(x.month).padStart(2,'0')==='12');
+                if(dec) return balOf(dec);
+                const before=chronBal.filter(x=>Number(x.year)<Number(y));
+                if(before.length>0){
+                    const last=before[before.length-1];
+                    return balOf(last)+chronInv.filter(x=>x.date.slice(0,7)>ym(last)&&x.date.slice(0,4)<y).reduce((s,x)=>s+invOf(x),0);
+                }
+                return chronInv.filter(x=>x.date.slice(0,4)<y).reduce((s,x)=>s+invOf(x),0);
+            }
+
+            // 잔고 기록 1건 기준으로 그 해 수익률 계산 (넣은 돈은 그 잔고의 달까지만 반영)
+            function calcPeriod(b){
+                const y=b.year; const key=ym(b);
+                const ytd=chronInv.filter(x=>x.date.slice(0,4)===y&&x.date.slice(0,7)<=key).reduce((s,x)=>s+invOf(x),0);
+                const mon=chronInv.filter(x=>x.date.slice(0,7)===key).reduce((s,x)=>s+invOf(x),0);
+                const annBal=yearStartBase(y)+ytd; const accBal=balOf(b);
+                const roi=annBal>0?Number((((accBal-annBal)/annBal)*100).toFixed(1)):0;
+                return {annualBalance:annBal, accountBalance:accBal, annualROI:roi, monthInvest:mon};
+            }
+
+            let periods = [];
             if(periodicSub === 'month') {
-                chronBal.forEach(b => {
-                    let y=b.year; let m=b.month;
-                    let lastDec = chronBal.find(x=>x.year==String(Number(y)-1)&&x.month=="12");
-                    let startBal = activeCat==='us' ? (lastDec?Number(lastDec.usd):0) : (lastDec?Number(lastDec.krw||0):0);
-                    let ytd=0, mon=0;
-                    if(activeCat==='us') {
-                        ytd = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]<=m).reduce((s,x)=>s+Number(x.usd),0);
-                        mon = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]==m).reduce((s,x)=>s+Number(x.usd),0);
-                    } else {
-                        ytd = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]<=m).reduce((s,x)=>s+Number(x.krw),0);
-                        mon = chronInv.filter(x=>x.date.startsWith(y)&&x.date.split('-')[1]==m).reduce((s,x)=>s+Number(x.krw),0);
-                    }
-                    let annBal = startBal+ytd;
-                    let accBal = activeCat==='us' ? Number(b.usd) : Number(b.krw||0);
-                    let roi = annBal>0?(((accBal-annBal)/annBal)*100).toFixed(1):"0.0";
-                    periods.push({ label:`${y}.${Number(m)}월`, chartLabel:`${y.substring(2)}.${Number(m)}월`, annualBalance:annBal, accountBalance:accBal, annualROI:Number(roi), hasInvest:mon>0 });
+                chronBal.forEach(b=>{
+                    const r=calcPeriod(b);
+                    periods.push({label:`${b.year}.${Number(b.month)}월`, chartLabel:`${b.year.substring(2)}.${Number(b.month)}월`, annualBalance:r.annualBalance, accountBalance:r.accountBalance, annualROI:r.annualROI, hasInvest:r.monthInvest>0});
                 });
             } else if(periodicSub === 'quarter') {
-                let qMap={}; chronBal.forEach(b=>{let q=Math.ceil(Number(b.month)/3); qMap[b.year+'-'+q]=b;});
+                // 분기: 그 분기에서 가장 마지막으로 입력한 달의 잔고 기준
+                let qMap={}; chronBal.forEach(b=>{ qMap[b.year+'-'+Math.ceil(Number(b.month)/3)]=b; });
                 Object.keys(qMap).sort().forEach(k=>{
-                    let [y,q]=k.split('-');
-                    let lastDec=chronBal.find(x=>x.year==String(Number(y)-1)&&x.month=="12");
-                    let startBal=activeCat==='us'?(lastDec?Number(lastDec.usd):0):(lastDec?Number(lastDec.krw||0):0);
-                    let ytd=activeCat==='us'
-                        ? chronInv.filter(x=>x.date.startsWith(y)&&Math.ceil(Number(x.date.split('-')[1])/3)<=q).reduce((s,x)=>s+Number(x.usd),0)
-                        : chronInv.filter(x=>x.date.startsWith(y)&&Math.ceil(Number(x.date.split('-')[1])/3)<=q).reduce((s,x)=>s+Number(x.krw),0);
-                    let annBal=startBal+ytd; let bObj=qMap[k];
-                    let accBal=activeCat==='us'?Number(bObj.usd):Number(bObj.krw||0);
-                    let roi=annBal>0?(((accBal-annBal)/annBal)*100).toFixed(1):"0.0";
-                    periods.push({label:`${y}.${q}Q`,chartLabel:`${y.substring(2)}.${q}Q`,annualBalance:annBal,accountBalance:accBal,annualROI:Number(roi),hasInvest:false});
+                    const [y,q]=k.split('-'); const r=calcPeriod(qMap[k]);
+                    periods.push({label:`${y}.${q}Q`, chartLabel:`${y.substring(2)}.${q}Q`, annualBalance:r.annualBalance, accountBalance:r.accountBalance, annualROI:r.annualROI, hasInvest:false});
                 });
             } else if(periodicSub === 'year') {
-                let yMap={}; chronBal.forEach(b=>{yMap[b.year]=b;});
+                // 연도: 그 해 가장 마지막으로 입력한 달의 잔고 기준 (지난 해는 보통 12월)
+                let yMap={}; chronBal.forEach(b=>{ yMap[b.year]=b; });
                 Object.keys(yMap).sort().forEach(y=>{
-                    let lastDec=chronBal.find(x=>x.year==String(Number(y)-1)&&x.month=="12");
-                    let startBal=activeCat==='us'?(lastDec?Number(lastDec.usd):0):(lastDec?Number(lastDec.krw||0):0);
-                    let ytd=activeCat==='us'
-                        ? chronInv.filter(x=>x.date.startsWith(y)).reduce((s,x)=>s+Number(x.usd),0)
-                        : chronInv.filter(x=>x.date.startsWith(y)).reduce((s,x)=>s+Number(x.krw),0);
-                    let annBal=startBal+ytd; let bObj=yMap[y];
-                    let accBal=activeCat==='us'?Number(bObj.usd):Number(bObj.krw||0);
-                    let roi=annBal>0?(((accBal-annBal)/annBal)*100).toFixed(1):"0.0";
-                    periods.push({label:`${y}년`,chartLabel:`${y}년`,annualBalance:annBal,accountBalance:accBal,annualROI:Number(roi),hasInvest:false});
+                    const r=calcPeriod(yMap[y]);
+                    periods.push({label:`${y}년`, chartLabel:`${y}년`, annualBalance:r.annualBalance, accountBalance:r.accountBalance, annualROI:r.annualROI, hasInvest:false});
                 });
             }
 
