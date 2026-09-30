@@ -615,13 +615,16 @@
             const ctx=canvas.getContext('2d');
             const pointColors=data.map(v=>v>=0?'#C62828':'#1565C0');
             mainChartInst=new Chart(ctx,{
-                type:'line', data:{labels, datasets:[{data, borderColor:'rgba(160,160,160,0.3)', backgroundColor:'rgba(160,160,160,0.03)', borderWidth:2, pointBackgroundColor:pointColors, pointBorderColor:pointColors, pointRadius:6, fill:true}]},
-                options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, datalabels:{display:true,align:'top',color:'#fff',backgroundColor:'#2d2d2d',borderRadius:6,font:{weight:'bold',size:10},formatter:(v)=>v+'%'}}, scales:{x:{grid:{color:'#252525'},ticks:{color:'#888'}},y:{grid:{color:'#252525'},ticks:{color:'#888'}}}}, plugins:[ChartDataLabels]
+                type:'line', data:{labels, datasets:[{data, borderColor:'rgba(160,160,160,0.3)', backgroundColor:'rgba(160,160,160,0.03)', borderWidth:2, pointBackgroundColor:pointColors, pointBorderColor:pointColors, pointRadius:3, pointHoverRadius:5, fill:true}]},
+                options:{responsive:true, maintainAspectRatio:false, layout:{padding:{top:14, right:6}}, plugins:{legend:{display:false}, datalabels:{display:true,align:'top',anchor:'center',offset:3,color:'#fff',textStrokeColor:'#1a1a1a',textStrokeWidth:3,font:{weight:'bold',size:9},formatter:(v)=>v+'%'}}, scales:{x:{grid:{color:'#252525'},ticks:{color:'#888'}},y:{grid:{color:'#252525'},ticks:{color:'#888'}}}}, plugins:[ChartDataLabels]
             });
         }
 
         function openModal() {
+            // 새로 열 때는 이전 입력값을 넘겨받지 않음 (날짜=오늘, 금액=빈칸)
             modalDraft={};
+            modalActiveTab='';
+            document.getElementById('modal-content').innerHTML='';
             document.getElementById('input-modal').classList.remove('hidden');
             const catTitle=activeCat==='us'?'미국주식':(activeCat==='kr'?'ISA':'일반');
             document.getElementById('modal-cat-title').innerText=catTitle;
@@ -654,18 +657,19 @@
             document.querySelectorAll('[id^="m-tab-"]').forEach(b=>{ b.className="flex-1 py-3 text-xs font-bold border-b-2 border-transparent text-[#888]"; });
             const tgt=document.getElementById('m-tab-'+tab); if(tgt) tgt.className="flex-1 py-3 text-xs font-bold border-b-2 border-[#ff4e4e] text-white";
             const cc=document.getElementById('modal-content'); if(!cc) return;
-            const yOpts=`2025,2026,2027,2028`.split(',').map(y=>`<option value="${y}" ${y==='2026'?'selected':''}>${y}년</option>`).join('');
-            const mOpts=Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')).map(m=>`<option value="${m}" ${m==='05'?'selected':''}>${Number(m)}월</option>`).join('');
+            const T=getToday();   // 날짜·연월 기본값 = 오늘
+            let yOpts=''; for(let y=2025; y<=Math.max(2028, Number(T.y)+1); y++) yOpts+=`<option value="${y}" ${String(y)===T.y?'selected':''}>${y}년</option>`;
+            const mOpts=Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')).map(m=>`<option value="${m}" ${m===T.m?'selected':''}>${Number(m)}월</option>`).join('');
 
             if(activeCat==='us'){
                 if(tab==='invest'){
-                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><input type="date" id="f-date" required class="w-full p-4"><div class="grid grid-cols-2 gap-2"><div><label class="block text-[10px] text-[#888] mb-1">한화 투입액 (₩)</label><input type="text" id="f-krw" placeholder="원화입력" required class="w-full p-4" oninput="formatComma(this)"></div><div><label class="block text-[10px] text-[#888] mb-1">달러 환전액 ($)</label><input type="text" id="f-usd" placeholder="달러입력" required class="w-full p-4" oninput="formatComma(this)"></div></div><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
+                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><input type="date" id="f-date" required class="w-full p-4" value="${T.date}"><div class="grid grid-cols-2 gap-2"><div><label class="block text-[10px] text-[#888] mb-1">한화 투입액 (₩)</label><input type="text" id="f-krw" placeholder="원화입력" required class="w-full p-4" oninput="formatComma(this)"></div><div><label class="block text-[10px] text-[#888] mb-1">달러 환전액 ($)</label><input type="text" id="f-usd" placeholder="달러입력" required class="w-full p-4" oninput="formatComma(this)"></div></div><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
                 } else {
                     cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><div class="grid grid-cols-2 gap-2"><select id="f-year" class="p-4">${yOpts}</select><select id="f-month" class="p-4">${mOpts}</select></div><div class="grid grid-cols-2 gap-2"><div><label class="block text-[10px] text-[#888] mb-1">달러 계좌 잔고 ($)</label><input type="text" id="f-usd" placeholder="달러잔고" required class="w-full p-4" oninput="formatComma(this)"></div><div><label class="block text-[10px] text-[#888] mb-1">적용 고시 환율 (₩)</label><input type="text" id="f-rate" placeholder="현재환율" required class="w-full p-4" oninput="formatComma(this)"></div></div><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
                 }
             } else {
                 if(tab==='invest'){
-                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><input type="date" id="f-date" required class="w-full p-4"><input type="text" id="f-krw" placeholder="원화입력" required class="w-full p-4" oninput="formatComma(this)"><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
+                    cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><input type="date" id="f-date" required class="w-full p-4" value="${T.date}"><input type="text" id="f-krw" placeholder="원화입력" required class="w-full p-4" oninput="formatComma(this)"><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
                 } else {
                     cc.innerHTML=`<form onsubmit="handleFormSubmit(event)" class="space-y-4"><div class="grid grid-cols-2 gap-2"><select id="f-year" class="p-4">${yOpts}</select><select id="f-month" class="p-4">${mOpts}</select></div><input type="text" id="f-krw" placeholder="원화 계좌잔고" required class="w-full p-4" oninput="formatComma(this)"><button class="w-full bg-[#ff4e4e] py-4 rounded-xl font-black text-white">기록 저장</button></form>`;
                 }
@@ -732,6 +736,12 @@
                 } catch(err){ alert("❌ 백업 파일 파싱에 실패했습니다."); }
             };
             reader.readAsText(file);
+        }
+
+        function getToday(){
+            const d=new Date();
+            const y=String(d.getFullYear()); const m=String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0');
+            return {y, m, date:`${y}-${m}-${day}`};
         }
 
         function parseNum(val){ if(typeof val==='number') return val; return Number(String(val).replace(/[^0-9.-]/g,''))||0; }
